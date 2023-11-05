@@ -1,7 +1,14 @@
 package main
 
-import "fmt"
+import (
+	"net/http"
+	"reportIntermediate/internal/utils/logs"
+	"reportIntermediate/pkg/interceptor"
+)
 
 func main() {
-	fmt.Println("Hello World")
+	logs.Init()
+	logs.SetDebugMode()
+	http.Handle("/", logs.LogRequestMiddleware(http.HandlerFunc(interceptor.ServeHTTP)))
+	http.ListenAndServe(":8080", nil)
 }
