@@ -12,11 +12,19 @@ import (
 
 var Log *zap.Logger
 
-const visibleHeaders = "host,x-request-id,x-real-ip,content-length,user-agent,accept-encoding,content-type,custom-app-headers"
+var visibleHeaders string
 
 var bodyMaxLen = 255
 
 var debug bool = false
+
+func GetLogger() *zap.Logger {
+	return Log
+}
+
+func SetVisibleHeaders(s string) {
+	visibleHeaders = s
+}
 
 func SetDebugMode() {
 	debug = true
@@ -124,14 +132,6 @@ type Request struct {
 }
 type HeaderList map[string]string
 
-func (h HeaderList) GetVisible() HeaderList {
-	headers := HeaderList{}
-	for _, header := range strings.Split(visibleHeaders, ",") {
-		headers[header] = h[header]
-	}
-	return headers
-}
-
 // "response": {
 // 	"status": 500,
 //  "body": "{ \"bodyContent\" }",
@@ -155,12 +155,19 @@ type Logging struct {
 	Response *Response
 }
 
-func Init() {
+func Init(loglevel string, visibleH string) {
 	var err error
-	Log, err = zap.NewProduction()
+	fmt.Println(loglevel)
+	switch loglevel {
+	case "DEVELOPMENT":
+		Log, err = zap.NewDevelopment()
+	default:
+		Log, err = zap.NewProduction()
+	}
 	if err != nil {
 		panic(err)
 	}
+	visibleHeaders = visibleH
 }
 
 func RequestToLog(r *http.Request) {
@@ -174,7 +181,7 @@ func RequestToLog(r *http.Request) {
 		IP:      r.RemoteAddr,
 		URL:     r.URL.String(),
 		Method:  r.Method,
-		Headers: GetHeaders(r.Header),
+		Headers: getHeaders(r.Header, r.Host),
 		Body:    visibleBody,
 	}
 	Log.Info("request", zap.Any("request", request))
@@ -182,6 +189,7 @@ func RequestToLog(r *http.Request) {
 
 func ResponseToLog(r *http.Response) {
 	var visibleBody string
+
 	if debug {
 		visibleBody = getResponseBodyFromResponse(r)
 	} else {
@@ -191,7 +199,7 @@ func ResponseToLog(r *http.Response) {
 		Status:  r.StatusCode,
 		Body:    visibleBody,
 		Message: r.Status,
-		Headers: GetHeaders(r.Header),
+		Headers: getHeaders(r.Header, r.Request.Host),
 	}
 	Log.Info("response", zap.Any("response", response))
 }
@@ -204,15 +212,24 @@ func LogRequestMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-
-func GetHeaders(h http.Header) *HeaderList {
+func getHeaders(h http.Header, host string) *HeaderList {
+	h.Add("host", host)
 	headers := make(HeaderList)
-	for k, v := range h {
-		if k == "Authorization" {
-			headers[k] = "REDACTED"
-		} else {
-			headers[k] = strings.Join(v, ",")
+	headers.GetVisible(h)
+	return &headers
+}
+
+func (hl HeaderList) GetVisible(originalH http.Header) {
+	if visibleHeaders != "*" {
+		listVisibleHeaders := strings.Split(visibleHeaders, ",")
+		for _, header := range listVisibleHeaders {
+			if h := originalH.Get(header); h != "" {
+				hl[header] = h
+			}
+		}
+	} else {
+		for header, value := range originalH {
+			hl[header] = value[0]
 		}
 	}
-	return &headers
 }
